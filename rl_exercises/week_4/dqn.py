@@ -4,12 +4,16 @@ Deep Q-Learning implementation.
 
 from typing import Any, Dict, List, Tuple
 
+import os
+
 import gymnasium as gym
 import hydra
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from hydra.utils import get_original_cwd
 from omegaconf import DictConfig
 from rl_exercises.agent import AbstractAgent
 from rl_exercises.week_4.buffers import ReplayBuffer
@@ -121,6 +125,8 @@ class DQNAgent(AbstractAgent):
         self.target_update_freq = target_update_freq
 
         self.total_steps = 0  # for ε decay and target sync
+        # ganz am Ende von __init__
+        self.seed = seed
 
     def epsilon(self) -> float:
         """
@@ -251,30 +257,22 @@ class DQNAgent(AbstractAgent):
         return float(loss.item())
 
     def train(self, num_frames: int, eval_interval: int = 1000) -> None:
-        """
-        Run a training loop for a fixed number of frames.
-
-        Parameters
-        ----------
-        num_frames : int
-            Total environment steps.
-        eval_interval : int
-            Every this many episodes, print average reward.
-        """
         state, _ = self.env.reset()
         ep_reward = 0.0
         recent_rewards: List[float] = []
+
+        # Für CSV-Logging
+        episode_rewards = []
+        steps = []
 
         for frame in range(1, num_frames + 1):
             action = self.predict_action(state)
             next_state, reward, done, truncated, _ = self.env.step(action)
 
-            # store and step
             self.buffer.add(state, action, reward, next_state, done or truncated, {})
             state = next_state
             ep_reward += reward
 
-            # update if ready
             if len(self.buffer) >= self.batch_size:
                 batch = self.buffer.sample(self.batch_size)
                 _ = self.update_agent(batch)
@@ -282,8 +280,9 @@ class DQNAgent(AbstractAgent):
             if done or truncated:
                 state, _ = self.env.reset()
                 recent_rewards.append(ep_reward)
+                episode_rewards.append(ep_reward)
+                steps.append(frame)
                 ep_reward = 0.0
-                # logging
                 if len(recent_rewards) % 10 == 0:
                     avg = np.mean(recent_rewards[-10:])
                     print(
@@ -291,6 +290,13 @@ class DQNAgent(AbstractAgent):
                     )
 
         print("Training complete.")
+
+        # --- hier kommt das CSV-Dumping ---
+        training_data = pd.DataFrame({"steps": steps, "rewards": episode_rewards})
+        orig_cwd = get_original_cwd()
+        out_path = os.path.join(orig_cwd, f"training_data_dqn_seed_{self.seed}.csv")
+        training_data.to_csv(out_path, index=False)
+        print(f"Saved DQN training data to {out_path}")
 
 
 @hydra.main(config_path="../configs/agent/", config_name="dqn", version_base="1.1")

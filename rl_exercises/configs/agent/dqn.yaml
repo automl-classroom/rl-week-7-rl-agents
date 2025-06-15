@@ -1,4 +1,8 @@
 # @package _global_
+hydra:
+  run:
+    dir: .
+
 env:
   name: CartPole-v1
 
